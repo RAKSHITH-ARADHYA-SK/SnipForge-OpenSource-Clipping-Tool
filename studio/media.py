@@ -121,7 +121,8 @@ def info(url: str) -> dict:
         i = ydl.extract_info(url, download=False)
     return {"title": i.get("title") or "", "uploader": i.get("uploader") or i.get("channel") or "",
             "duration": float(i.get("duration") or 0), "is_live": bool(i.get("is_live")),
-            "thumbnail": i.get("thumbnail") or "", "kind": i.get("_type") or "video"}
+            "thumbnail": i.get("thumbnail") or "", "kind": i.get("_type") or "video",
+            "width": i.get("width") or 0, "height": i.get("height") or 0}
 
 
 def youtube_words(url: str):
@@ -213,7 +214,7 @@ def preview(url: str) -> dict:
         except Exception:
             thumb = ""
     out = {"title": i["title"][:200], "uploader": i["uploader"][:120], "duration": i["duration"],
-           "is_live": i["is_live"], "thumb": thumb}
+           "is_live": i["is_live"], "thumb": thumb, "width": i.get("width", 0), "height": i.get("height", 0)}
     if len(_PREVIEWS) > 300:
         _PREVIEWS.pop(next(iter(_PREVIEWS)))
     _PREVIEWS[url] = out

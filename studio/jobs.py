@@ -130,7 +130,7 @@ def clean_options(options) -> dict:
         elif k == "layout":
             v = v if v in render.LAYOUTS else DEFAULTS["layout"]
         elif k == "aspect":
-            v = v if v in ("9:16", "16:9") else DEFAULTS["aspect"]
+            v = v if v in ("9:16", "16:9", "auto") else DEFAULTS["aspect"]
         else:                                    # range_start, range_end: seconds into the video
             v = float(v)
             if not math.isfinite(v) or v < 0:
@@ -394,7 +394,14 @@ def request_render(jid, cid, changes: dict):
     if new.get("layout") not in render.LAYOUTS:
         new["layout"] = DEFAULTS["layout"]
     if new.get("aspect") not in ("9:16", "16:9"):
-        new["aspect"] = "9:16"
+        if clip.get("aspect") in ("9:16", "16:9"):
+            new["aspect"] = clip["aspect"]
+        elif job.get("options", {}).get("aspect") in ("9:16", "16:9"):
+            new["aspect"] = job["options"]["aspect"]
+        elif job.get("width", 0) > job.get("height", 0) > 0:
+            new["aspect"] = "16:9"
+        else:
+            new["aspect"] = "9:16"
     if new.get("color") and new.get("color") not in render.COLOR_PRESETS:
         new["color"] = None
     if new.get("effect") and new.get("effect") not in getattr(render, "VIRAL_EFFECTS", {}):
@@ -613,7 +620,8 @@ def _run_job(job):
         if meta["is_live"]:
             raise RuntimeError("This link is a live stream, so it would never finish downloading. Open the creator, "
                                "put this link under Setup, and press Start recording instead.")
-        _set(job, title=meta["title"], uploader=meta["uploader"], duration=meta["duration"])
+        _set(job, title=meta["title"], uploader=meta["uploader"], duration=meta["duration"],
+             width=meta.get("width", 0), height=meta.get("height", 0))
         if not job.get("thumb") and media.save_thumb(d, url=src["url"]):
             _set(job, thumb=True)
         usage.set_context(job["creator"], meta["title"])
@@ -773,9 +781,12 @@ def _run_job(job):
                 c["description"] = brain.add_credits(c.get("description", ""), c_name)
             if c.get("description"):
                 c["description"] = brain.ensure_hashtags(c["description"])
+            target_aspect = o.get("aspect", "9:16")
+            if target_aspect == "auto" or target_aspect not in ("9:16", "16:9"):
+                target_aspect = "16:9" if (job.get("width", 0) > job.get("height", 0) > 0) else "9:16"
             c.update(id=f"clip{len(job['clips']) + 1:02d}", start=round(c["start"] + shift, 2),
                      end=round(c["end"] + shift, 2), style=o["style"], layout=o["layout"],
-                     aspect=o.get("aspect", "9:16"), status="queued", version=0)
+                     aspect=target_aspect, status="queued", version=0)
             job["clips"].append(c)
             futures.append(renders.submit(ctx.bind(make), c, list(words)))
         job["ai"] = {"model": model, "tokens": tokens, "note": "", "log": notes[-5:]}

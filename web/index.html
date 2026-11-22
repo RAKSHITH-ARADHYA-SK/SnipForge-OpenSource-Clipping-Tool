@@ -1872,7 +1872,7 @@ function drawAdd(variant) {
         ${stepper("o_min", "Shortest", c?.min_len ?? 15, 5, 120, 5, "s")}
         ${stepper("o_maxlen", "Longest", c?.max_len ?? 60, 10, 600, 5, "s")}
       </div></div>
-      <div class="ob"><div class="ot">Aspect ratio</div>${choice("o_aspect", [{v:"9:16", label:"9:16 Vertical", prev:`<span class="lay-prev" style="aspect-ratio:9/16;width:14px;height:24px;border:1.5px solid currentColor;border-radius:2px;display:inline-block"></span>`}, {v:"16:9", label:"16:9 Landscape", prev:`<span class="lay-prev" style="aspect-ratio:16/9;width:24px;height:14px;border:1.5px solid currentColor;border-radius:2px;display:inline-block"></span>`}], c?.aspect ?? "9:16")}</div>
+      <div class="ob"><div class="ot">Aspect ratio</div>${choice("o_aspect", [{v:"auto", label:"Auto (Match Video)", prev:`<span class="lay-prev" style="width:20px;height:18px;border:1.5px dashed currentColor;border-radius:2px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">A</span>`}, {v:"16:9", label:"16:9 Landscape", prev:`<span class="lay-prev" style="aspect-ratio:16/9;width:24px;height:14px;border:1.5px solid currentColor;border-radius:2px;display:inline-block"></span>`}, {v:"9:16", label:"9:16 Vertical", prev:`<span class="lay-prev" style="aspect-ratio:9/16;width:14px;height:24px;border:1.5px solid currentColor;border-radius:2px;display:inline-block"></span>`}], c?.aspect ?? "auto")}</div>
       <div class="ob"><div class="ot">Caption style</div>${choice("o_style", Object.entries(S.status.styles || {}).map(([k, v]) => ({v:k, label:v, prev:capPrev(k)})), c?.style ?? "bounce")}</div>
       <div class="ob"><div class="ot">Layout</div>${choice("o_layout", Object.entries(S.status.layouts || {}).map(([k, v]) => ({v:k, label:LAYOUT_SHORT[k] || v, title:v, prev:`<span class="lay-prev ${esc(k)}"><span class="ph"><i></i></span></span>`})), c?.layout ?? "blur")}</div>
       <div class="ob"><div class="ot">Caption accent color</div><select id="o_color" style="height:40px;border-radius:10px;font-weight:600">
@@ -1926,8 +1926,15 @@ document.addEventListener("click", e => {
     p.querySelector("input[type=hidden]").dispatchEvent(new Event("change", {bubbles: true})); return; }
   if (!e.target.closest(".pick") || e.target.closest(".pick-new")) closePicks();
   const sg = e.target.closest("[data-seg]");
-  if (sg) { $("#" + sg.dataset.seg).value = sg.dataset.v;
-    sg.parentElement.querySelectorAll("[data-seg]").forEach(b => b.setAttribute("aria-pressed", String(b === sg))); return; }
+  if (sg) {
+    const targetInput = $("#" + sg.dataset.seg);
+    if (targetInput) {
+      targetInput.value = sg.dataset.v;
+      targetInput.dataset.manuallySet = "1";
+    }
+    sg.parentElement.querySelectorAll("[data-seg]").forEach(b => b.setAttribute("aria-pressed", String(b === sg)));
+    return;
+  }
   const st = e.target.closest("[data-step]");
   if (st) { const i = $("#" + st.dataset.step), s = Number(i.step) || 1, d = Number(st.dataset.d);
     const v = Math.min(Number(i.max), Math.max(Number(i.min), (Number(i.value) || 0) + d * s)); i.value = v; }
@@ -1944,7 +1951,7 @@ document.addEventListener("keydown", e => {
 const targetCreator = () => creatorId() || $("#o_creator")?.value || "";
 function jobOptions() {
   const n = id => { const v = $(id).value; return v === "" ? null : Number(v); };
-  const o = {max_clips:n("#o_max"), min_len:n("#o_min"), max_len:n("#o_maxlen"), style:$("#o_style").value, layout:$("#o_layout").value, quality:n("#o_quality"), color:$("#o_color")?.value || "yellow", aspect:$("#o_aspect")?.value || "9:16"};
+  const o = {max_clips:n("#o_max"), min_len:n("#o_min"), max_len:n("#o_maxlen"), style:$("#o_style").value, layout:$("#o_layout").value, quality:n("#o_quality"), color:$("#o_color")?.value || "yellow", aspect:$("#o_aspect")?.value || "auto"};
   if (n("#o_from") !== null) o.range_start = n("#o_from") * 60;
   if (n("#o_to") !== null) o.range_end = n("#o_to") * 60;
   return o;
@@ -2013,6 +2020,13 @@ function drawAtt() {
   box.querySelectorAll("video").forEach(v => v.addEventListener("loadedmetadata", () => {
     const f = att().files.find(x => x.id === v.closest(".lp").dataset.row);
     if (f && !f.dur) { f.dur = v.duration; const th = v.parentElement; if (!th.querySelector(".du")) th.insertAdjacentHTML("beforeend", `<span class="du">${fmtLen(f.dur)}</span>`); }
+    if (v.videoWidth && v.videoHeight && v.videoWidth > v.videoHeight) {
+      const asp = $("#o_aspect");
+      if (asp && !asp.dataset.manuallySet && (asp.value === "auto" || !asp.value)) {
+        asp.value = "16:9";
+        document.querySelectorAll('[data-seg="o_aspect"]').forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === "16:9")));
+      }
+    }
   }, {once: true}));
   $("#att")?.classList.toggle("has", !!h);
   const u = $("#url"); if (u) u.placeholder = A.links.length || A.files.length ? "Paste another link" : "Paste a YouTube, Twitch or Kick video link";
@@ -2041,7 +2055,16 @@ function takeLink(A, u, input) {
   A.links.push(l); A.note = null;
   if (input) input.value = "";            // the box is free for the next link straight away
   drawAtt();
-  lookUp(u).then(info => { l.state = "ok"; l.info = info; }, e => { l.state = "bad"; l.msg = e.message; }).then(() => {
+  lookUp(u).then(info => {
+    l.state = "ok"; l.info = info;
+    if (info && info.width && info.height && info.width > info.height) {
+      const asp = $("#o_aspect");
+      if (asp && !asp.dataset.manuallySet && (asp.value === "auto" || !asp.value)) {
+        asp.value = "16:9";
+        document.querySelectorAll('[data-seg="o_aspect"]').forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === "16:9")));
+      }
+    }
+  }, e => { l.state = "bad"; l.msg = e.message; }).then(() => {
     drawAtt();
     if (A.queued && !A.links.some(x => x.state === "wait")) {
       A.queued = false;
@@ -2799,6 +2822,7 @@ function openClip(jid, cid) { D.jid = jid; D.cid = cid; D.sig = ""; drawClipDlg(
 function drawClipDlg(full) {
   const j = jobOf(D.jid), c = j?.clips.find(x => x.id === D.cid), dlg = $("#clipdlg");
   if (!c) { if (dlg.open) dlg.close(); return; }
+  const is169 = c.aspect === "16:9" || (!c.aspect && (j.options?.aspect === "16:9" || (j.width && j.width > j.height)));
   const m = `/media/${j.id}/`, sig = c.status + c.version;
   const clipDur = Math.max(1, (c.end - c.start) || 30);
   const coverBar = c.status === "done" ? `<div class="cover-bar" style="width:100%;padding:8px 12px;background:var(--frame-2);display:flex;align-items:center;gap:10px;box-sizing:border-box">
@@ -2807,7 +2831,7 @@ function drawClipDlg(full) {
     <span id="coverTime" style="font-size:12px;color:var(--frame-dim);min-width:38px;text-align:right">0.5s</span>
     <button type="button" class="btn sm" data-act="setcover" data-j="${j.id}" data-c="${esc(c.id)}" style="background:var(--brand);color:#1A120D;font-weight:600;padding:2px 10px;font-size:12px">Set cover</button>
   </div>` : "";
-  const stage = c.status === "done" ? `<div style="display:flex;flex-direction:column;width:100%;height:100%"><video src="${m}${esc(c.file)}?v=${c.version}" poster="${m}${esc(c.cover)}?v=${c.version}" controls autoplay playsinline style="flex:1;max-height:calc(100vh - 100px);aspect-ratio:${c.aspect === '16:9' ? '16/9' : '9/16'}"></video>${coverBar}</div>`
+  const stage = c.status === "done" ? `<div style="display:flex;flex-direction:column;width:100%;height:100%"><video src="${m}${esc(c.file)}?v=${c.version}" poster="${m}${esc(c.cover)}?v=${c.version}" controls autoplay playsinline style="flex:1;max-height:calc(100vh - 100px);aspect-ratio:${is169 ? '16/9' : '9/16'}"></video>${coverBar}</div>`
     : c.status === "error" ? `<div class="err" style="padding:20px;text-align:center">${esc(c.error || "Could not make this clip.")}</div>`
     : `<span class="making">${c.status === "rendering" ? "Making this clip…" : "Waiting its turn…"}</span>`;
   if (full) {
@@ -2816,7 +2840,7 @@ function drawClipDlg(full) {
         <div class="job-head" style="margin:0">
           <div>
             <div style="display:flex;align-items:center;gap:8px">
-              <h2 style="margin:0;font-size:16px;font-weight:700">${ic("scissors")}Shorts Editor</h2>
+              <h2 id="clipEditorTitle" style="margin:0;font-size:16px;font-weight:700">${ic("scissors")}${is169 ? "16:9 Landscape Video Editor" : "Shorts Editor"}</h2>
               <span class="badge ${scoreCls(c.score)}" style="position:static">${c.judges ? "Words " + c.judges.words + (c.judges.reaction ? " · Reaction " + c.judges.reaction : "") : c.score ? "Score " + c.score : "Clipped by hand"}</span>
             </div>
             <p class="sub" style="margin-top:6px">${esc(c.reason || "")}</p>
@@ -2826,11 +2850,12 @@ function drawClipDlg(full) {
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;margin-bottom:6px">
           <h3 style="margin:0">On the video</h3>
           <div style="display:flex;gap:6px">
+            <button type="button" class="btn sm" data-act="optforlandscape" style="background:var(--brand-soft);color:var(--brand-ink);font-weight:700;padding:3px 10px;font-size:11px" title="Auto-set 16:9 Landscape format, bottom captions, and full 1920x1080 video">${ic("bolt")}16:9 Landscape Preset</button>
             <button type="button" class="btn sm" data-act="optforshorts" style="background:var(--brand-soft);color:var(--brand-ink);font-weight:700;padding:3px 10px;font-size:11px" title="Auto-set 9:16 Vertical format, viral captions and ensure length fits YouTube Shorts (&le;60s)">${ic("bolt")}9:16 Shorts Preset</button>
             <button type="button" class="btn sm" data-act="randomviralfx" data-j="${j.id}" data-c="${esc(c.id)}" style="background:var(--brand);color:var(--brand-ink);font-weight:700;padding:3px 10px;font-size:11px" title="Apply randomized viral caption style, neon accent color and video grading">${ic("bolt")}Randomize Viral FX</button>
           </div>
         </div>
-        <label class="f" id="clipHookLabel" style="${(c.aspect || '9:16') === '16:9' ? 'display:none;' : ''}">
+        <label class="f" id="clipHookLabel" style="${is169 ? 'display:none;' : ''}">
           <span style="display:flex;justify-content:space-between;align-items:center">
             <span>Big text</span>
             <button type="button" class="btn sm ghost" data-act="matchhook" data-j="${j.id}" data-c="${esc(c.id)}" style="color:var(--brand-deep);padding:0 6px;font-size:11px;height:20px" title="Generate Big Text matching this Short's exact action and punchline">${ic("bolt")}Match to Short</button>
@@ -2839,8 +2864,8 @@ function drawClipDlg(full) {
         </label>
         <div class="two">
           <label class="f">Aspect ratio<select data-f="aspect" id="clipAspect">
-            <option value="9:16" ${(c.aspect || "9:16") === "9:16" ? "selected" : ""}>9:16 Vertical (Shorts/Reels)</option>
-            <option value="16:9" ${(c.aspect || "9:16") === "16:9" ? "selected" : ""}>16:9 Landscape (YouTube)</option>
+            <option value="16:9" ${is169 ? "selected" : ""}>16:9 Landscape (YouTube)</option>
+            <option value="9:16" ${!is169 ? "selected" : ""}>9:16 Vertical (Shorts/Reels)</option>
           </select></label>
           <label class="f">Caption style<select data-f="style" id="clipStyle">${opts(S.status.styles, c.style)}</select></label>
         </div>
@@ -2864,9 +2889,11 @@ function drawClipDlg(full) {
             <button type="button" class="btn sm ghost" data-act="quickdur" data-dur="15" style="padding:0 6px;height:22px;font-size:11px">15s</button>
             <button type="button" class="btn sm ghost" data-act="quickdur" data-dur="30" style="padding:0 6px;height:22px;font-size:11px">30s</button>
             <button type="button" class="btn sm ghost" data-act="quickdur" data-dur="45" style="padding:0 6px;height:22px;font-size:11px">45s</button>
-            <button type="button" class="btn sm ghost" data-act="quickdur" data-dur="59.5" style="padding:0 6px;height:22px;font-size:11px;font-weight:700">60s (Max)</button>
+            <button type="button" class="btn sm ghost" data-act="quickdur" data-dur="59.5" style="padding:0 6px;height:22px;font-size:11px;font-weight:700">60s</button>
+            <button type="button" class="btn sm ghost" data-act="quickdur" data-dur="180" style="padding:0 6px;height:22px;font-size:11px">3m</button>
+            <button type="button" class="btn sm ghost" data-act="quickdur" data-dur="300" style="padding:0 6px;height:22px;font-size:11px">5m</button>
           </div>
-          <span id="clipDurBadge" class="pill ${(c.end - c.start) <= 60 ? 'good' : 'warn'}" style="font-size:10px;padding:1px 6px">${(c.end - c.start).toFixed(1)}s ${(c.end - c.start) <= 60 ? '✓ Shorts' : '⚠️ >60s'}</span>
+          <span id="clipDurBadge" class="pill ${is169 ? ((c.end - c.start) <= 600 ? 'good' : 'warn') : ((c.end - c.start) <= 60 ? 'good' : 'warn')}" style="font-size:10px;padding:1px 6px">${(c.end - c.start).toFixed(1)}s ${is169 ? ((c.end - c.start) <= 600 ? '✓ 16:9 Video' : '⚠️ >10m') : ((c.end - c.start) <= 60 ? '✓ Shorts' : '⚠️ >60s')}</span>
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;margin-bottom:6px">
           <div style="display:flex;align-items:center;gap:8px">
@@ -2886,7 +2913,7 @@ function drawClipDlg(full) {
         </label>
         <div class="row" style="gap:8px">
           <button class="btn sm" data-act="savecliptext" data-j="${j.id}" data-c="${esc(c.id)}">${ic("check")}Save now</button>
-          <button class="btn primary sm" data-act="remake" title="Re-render this clip into a Short with your updated trim, captions, viral hook and styling">${ic("scissors")}Render Short</button>
+          <button class="btn primary sm" data-act="remake" id="clipRenderBtn" title="${is169 ? 'Re-render this clip into a 16:9 landscape video' : 'Re-render this clip into a Short with your updated trim, captions, viral hook and styling'}">${ic("scissors")}${is169 ? "Render 16:9 Video" : "Render Short"}</button>
         </div>
         <!-- Upload Timeline & Timing Selector -->
         <div class="sched-slot-box" style="margin-top:14px;margin-bottom:8px;padding:12px;background:var(--muted);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;gap:8px">
@@ -3053,9 +3080,10 @@ function updateClipDurBadge() {
   const s = parseFloat(sEl.value) || 0;
   const e = parseFloat(eEl.value) || s;
   const dur = Math.max(0, e - s);
-  const ok = dur <= 60 && dur > 0;
+  const is169 = $("#clipAspect")?.value === "16:9";
+  const ok = is169 ? (dur <= 600 && dur > 0) : (dur <= 60 && dur > 0);
   bEl.className = `pill ${ok ? "good" : "warn"}`;
-  bEl.textContent = `${dur.toFixed(1)}s ${ok ? "✓ Shorts" : "⚠️ >60s"}`;
+  bEl.textContent = is169 ? `${dur.toFixed(1)}s ${ok ? "✓ 16:9 Video" : "⚠️ >10m"}` : `${dur.toFixed(1)}s ${ok ? "✓ Shorts" : "⚠️ >60s"}`;
 }
 
 $("#clipdlg").addEventListener("change", e => {
@@ -3065,6 +3093,14 @@ $("#clipdlg").addEventListener("change", e => {
     if (hookLabel) hookLabel.style.display = is169 ? "none" : "";
     const vid = $("#stage video");
     if (vid) vid.style.aspectRatio = is169 ? "16/9" : "9/16";
+    const titleH2 = $("#clipEditorTitle");
+    if (titleH2) titleH2.innerHTML = `${ic("scissors")}${is169 ? "16:9 Landscape Video Editor" : "Shorts Editor"}`;
+    const renderBtn = $("#clipRenderBtn");
+    if (renderBtn) {
+      renderBtn.innerHTML = `${ic("scissors")}${is169 ? "Render 16:9 Video" : "Render Short"}`;
+      renderBtn.title = is169 ? "Re-render this clip into a 16:9 landscape video" : "Re-render this clip into a Short with your updated trim, captions, viral hook and styling";
+    }
+    updateClipDurBadge();
   }
   if (e.target.id === "clipStart" || e.target.id === "clipEnd") {
     updateClipDurBadge();
@@ -3738,12 +3774,35 @@ document.addEventListener("click", async e => {
       }
       return;
     }
+    if (a === "optforlandscape") {
+      const asp = $("#clipAspect"), hookLabel = $("#clipHookLabel");
+      if (asp) asp.value = "16:9";
+      if (hookLabel) hookLabel.style.display = "none";
+      const vid = $("#stage video");
+      if (vid) vid.style.aspectRatio = "16/9";
+      const titleH2 = $("#clipEditorTitle");
+      if (titleH2) titleH2.innerHTML = `${ic("scissors")}16:9 Landscape Video Editor`;
+      const renderBtn = $("#clipRenderBtn");
+      if (renderBtn) {
+        renderBtn.innerHTML = `${ic("scissors")}Render 16:9 Video`;
+        renderBtn.title = "Re-render this clip into a 16:9 landscape video";
+      }
+      updateClipDurBadge();
+      return toast("Configured 16:9 landscape preset (up to 10 min). Click 'Render 16:9 Video' to apply.", "ok");
+    }
     if (a === "optforshorts") {
       const asp = $("#clipAspect"), hookLabel = $("#clipHookLabel");
       if (asp) asp.value = "9:16";
       if (hookLabel) hookLabel.style.display = "";
       const vid = $("#stage video");
       if (vid) vid.style.aspectRatio = "9/16";
+      const titleH2 = $("#clipEditorTitle");
+      if (titleH2) titleH2.innerHTML = `${ic("scissors")}Shorts Editor`;
+      const renderBtn = $("#clipRenderBtn");
+      if (renderBtn) {
+        renderBtn.innerHTML = `${ic("scissors")}Render Short`;
+        renderBtn.title = "Re-render this clip into a Short with your updated trim, captions, viral hook and styling";
+      }
       const sEl = $("#clipStart"), eEl = $("#clipEnd");
       if (sEl && eEl) {
         const s = parseFloat(sEl.value) || 0;

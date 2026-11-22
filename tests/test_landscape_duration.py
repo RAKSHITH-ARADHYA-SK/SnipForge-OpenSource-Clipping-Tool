@@ -14,6 +14,10 @@ class TestLandscapeAndDuration(unittest.TestCase):
         self.assertEqual(opts["min_len"], 120)
         self.assertEqual(opts["aspect"], "16:9")
 
+        # Test clean_options accepts auto
+        opts_auto = jobs.clean_options({"aspect": "auto"})
+        self.assertEqual(opts_auto["aspect"], "auto")
+
         # Test invalid aspect falls back to default 9:16
         opts_invalid = jobs.clean_options({"aspect": "4:3"})
         self.assertEqual(opts_invalid["aspect"], "9:16")
@@ -62,15 +66,27 @@ class TestLandscapeAndDuration(unittest.TestCase):
         # Fake job setup
         jobs._jobs["dummy_job"] = {
             "id": "dummy_job", "user": "test_user", "clips": [
-                {"id": "clip01", "start": 0.0, "end": 60.0, "status": "done"}
+                {"id": "clip01", "start": 0.0, "end": 60.0, "status": "done", "aspect": "16:9"}
             ],
-            "dir": "."
+            "dir": ".",
+            "width": 1920,
+            "height": 1080,
+            "options": {"aspect": "16:9"}
         }
         try:
             # 600s duration is accepted
             jobs.request_render("dummy_job", "clip01", {"start": 0, "end": 600, "aspect": "16:9"})
             clip = jobs._jobs["dummy_job"]["clips"][0]
             self.assertEqual(clip["end"] - clip["start"], 600)
+            self.assertEqual(clip["aspect"], "16:9")
+
+            # Re-rendering without passing aspect in changes keeps aspect: 16:9
+            jobs.request_render("dummy_job", "clip01", {"start": 10, "end": 70})
+            self.assertEqual(clip["aspect"], "16:9")
+
+            # If clip had no aspect set, it falls back to 16:9 from landscape video geometry
+            del clip["aspect"]
+            jobs.request_render("dummy_job", "clip01", {"start": 10, "end": 80})
             self.assertEqual(clip["aspect"], "16:9")
 
             # >600s duration raises ValueError
